@@ -5,41 +5,41 @@ on:
     tags:
       - 'v*'
     branches:
-      - main  # 添加分支触发
+      - main
 
 jobs:
   build:
     runs-on: windows-latest
     
     steps:
-    - uses: actions/checkout@v4  # 更新到 v4
+    - uses: actions/checkout@v4
     
     - name: Set up Python
-      uses: actions/setup-python@v5  # 更新到 v5
+      uses: actions/setup-python@v5
       with:
-        python-version: '3.12'  # 更新到 3.12
+        python-version: '3.12'
     
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
+        pip install cx_Freeze
     
     - name: Build executable
-      run: |
-        pyinstaller --onefile --windowed --icon=resources/icon.ico main.py
+      run: python setup.py build
     
     - name: Create release
       uses: softprops/action-gh-release@v1
       if: startsWith(github.ref, 'refs/tags/')
       with:
         files: |
-          dist/main.exe
+          build/exe.win-amd64-3.12/供应商数据智能匹配系统.exe
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Upload artifact
-      if: "!startsWith(github.ref, 'refs/tags/')"  # 非标签推送时上传构建产物
+      if: "!startsWith(github.ref, 'refs/tags/')"
       uses: actions/upload-artifact@v4
       with:
         name: PanDataone
-        path: dist/main.exe
+        path: build/exe.win-amd64-3.12/供应商数据智能匹配系统.exe
