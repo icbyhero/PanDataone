@@ -23,17 +23,18 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-        pip install cx_Freeze
+        pip install pyinstaller
     
     - name: Build executable
-      run: python setup.py build
+      run: |
+        pyinstaller --onefile --windowed --icon=resources/icon.ico --name="供应商数据智能匹配系统" main.py
     
     - name: Create release
       uses: softprops/action-gh-release@v1
       if: startsWith(github.ref, 'refs/tags/')
       with:
         files: |
-          build/exe.win-amd64-3.12/供应商数据智能匹配系统.exe
+          dist/供应商数据智能匹配系统.exe
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -42,4 +43,4 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: PanDataone
-        path: build/exe.win-amd64-3.12/供应商数据智能匹配系统.exe
+        path: dist/供应商数据智能匹配系统.exe
