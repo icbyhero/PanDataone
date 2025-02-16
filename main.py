@@ -193,12 +193,18 @@ class MainWindow(QMainWindow):
         logging.info("初始化供应商数据智能匹配系统")
         self.setWindowTitle("供应商数据智能匹配系统")
         
-        # 设置应用图标
+        # 修改图标设置部分
         icon_path = os.path.join(os.path.dirname(__file__), 'resources', 'icon.ico')
+        if getattr(sys, 'frozen', False):
+            # 如果是打包后的程序
+            base_path = sys._MEIPASS
+            icon_path = os.path.join(base_path, 'resources', 'icon.ico')
+        
         if os.path.exists(icon_path):
-            self.setWindowIcon(QIcon(icon_path))
-            
-        self.setMinimumSize(600, 400)
+            app_icon = QIcon(icon_path)
+            self.setWindowIcon(app_icon)
+            QApplication.setWindowIcon(app_icon)  # 设置应用程序级别的图标
+            self.setMinimumSize(600, 400)
 
         # 创建中央部件和主布局
         central_widget = QWidget()

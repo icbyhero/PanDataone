@@ -27,7 +27,7 @@ jobs:
     
     - name: Build executable
       run: |
-        pyinstaller --onefile --windowed --icon=resources/icon.ico --name="供应商数据智能匹配系统" main.py
+        pyinstaller --onefile --windowed --icon=resources/icon.ico --add-data "resources;resources" --name="供应商数据智能匹配系统" main.py
     
     - name: Create release
       uses: softprops/action-gh-release@v1
