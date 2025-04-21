@@ -44,6 +44,20 @@ def standardize_data(value: str, column_index: int) -> str:
             r'(\d{2,4})年(\d{1,2})[到至和-](\d{1,2})月',    # 25年3到4月、25年3-4月
         ]
         
+        # 处理数字日期范围格式 (如 202411-12)
+        num_range_pattern = r'(\d{4})(\d{1,2})-(\d{1,2})'
+        match = re.search(num_range_pattern, value)
+        if match:
+            year = match.group(1)
+            start_month = int(match.group(2))
+            end_month = int(match.group(3))
+            if 1 <= start_month <= 12 and 1 <= end_month <= 12:
+                # 返回逗号分隔的月份列表
+                months = []
+                for month in range(start_month, end_month + 1):
+                    months.append(f"{year}{str(month).zfill(2)}")
+                return ",".join(months)
+        
         # 先尝试匹配中文范围
         for pattern in cn_range_patterns:
             match = re.search(pattern, value)
@@ -260,7 +274,7 @@ class MainWindow(QMainWindow):
    - 请确保Excel文件中只包含这两个工作表，避免干扰分析结果
 
 2. 数据格式要求：
-   - 日期格式支持：2024-03、24年3月、3月等
+   - 日期格式支持：2024-03、24年3月、3月、202411-12（会自动处理为多个月份）
      示例：2024-03、24年3月、3-4月（会自动处理为多个月份）
    - 供应商名称：不区分全角半角，自动处理空格
      示例："ABC公司"与"A B C公司"会被视为相同
@@ -274,11 +288,21 @@ class MainWindow(QMainWindow):
    4) 分析完成后，结果将保存在同一Excel文件中
 
 4. 处理结果说明：
-   - 绿色：表示在匹配原表中找到对应数据
-   - 红色：表示在匹配原表中未找到对应数据
-   - 黄色：表示该数据重复查询
-   - 深红色：表示日期范围内的数据未能全部匹配成功
-   - 紫色：表示日期范围内的数据全部匹配成功
+   - 🟩绿色：表示在匹配原表中找到对应数据
+   - 🟥红色：表示在匹配原表中未找到对应数据
+   - 🟨黄色：表示该数据重复查询（最高优先级）
+   - 🟫棕色：表示日期范围内的数据未能全部匹配成功
+   - 🟪紫色：表示日期范围内的数据全部匹配成功
+   - 🟧橙色: 表示在表一中重复出现的数据（第二次及以后出现）
+   
+   颜色优先级：黄色 > 橙色 > 紫色/棕色 > 绿色/红色
+   当一条数据符合多个条件时，将按照优先级显示颜色。
+   处理逻辑:
+   - 系统首先对数据进行标准化处理，统一日期格式、供应商名称和产品名称
+   - 对于普通数据，直接在匹配原表中查找对应记录
+   - 对于日期范围（如"3-4月"、"202411-12"），系统会检查范围内每个月份是否都能匹配
+   - 当一个数据项匹配到多个供应商时，系统会为每个供应商创建单独的记录
+   - 匹配结果将分别保存在"匹配到的数据"和"未找到的数据"两个工作表中
 
 5. 常见问题：
    - 如果数据未匹配，请检查日期格式是否正确
@@ -485,7 +509,12 @@ class MainWindow(QMainWindow):
                 key = (standardize_data(str(row[0]), 1),  # 日期
                       standardize_data(str(row[1]), 2),  # 客户公司
                       standardize_data(str(row[2]), 3))  # 产品名称
-                sheet2_data[key] = row[3]  # 保存供应商信息
+                
+                # 如果键已存在，则将新的供应商添加到列表中
+                if key in sheet2_data:
+                    sheet2_data[key].append(row[3])
+                else:
+                    sheet2_data[key] = [row[3]]  # 创建新列表
     
             # 创建进度对话框
             progress = QProgressDialog("努力分析中....", "取消", 0, max_row - 1, self)
@@ -495,6 +524,15 @@ class MainWindow(QMainWindow):
             # 用于记录已处理的键值
             processed_keys = set()
     
+            # 用于记录已添加到匹配表的数据，避免重复
+            matched_records = set()
+    
+            # 用于记录日期范围内的月份
+            date_range_map = {}
+            
+            # 用于记录表一中已经出现过的数据
+            sheet1_seen_data = set()
+
             # 处理每一行数据
             for row in range(2, max_row + 1):
                 if progress.wasCanceled():
@@ -509,14 +547,40 @@ class MainWindow(QMainWindow):
                 
                 logging.debug(f"标准化后的搜索键: {search_key}")
     
-                # 设置单元格填充颜色和字体
-                fill_color = None
-                font_color = '000000'  # 默认黑色
+                # 初始化状态标记
+                is_duplicate = False  # 重复查询
+                is_sheet1_duplicate = False  # 表一中重复数据
+                is_date_range = False  # 日期范围
+                is_date_range_all_match = False  # 日期范围全部匹配
+                is_match = False  # 单条数据匹配成功
+                matched_results = []  # 存储匹配结果
+                
+                # 检查当前键是否已处理
+                if search_key in processed_keys:
+                    is_duplicate = True
+                
+                # 检查单月是否在已处理的日期范围内
+                if not is_duplicate and ',' not in search_key[0]:
+                    # 这是单月数据，检查是否包含在已处理的日期范围内
+                    for range_key, months in date_range_map.items():
+                        if search_key[1:] == range_key and search_key[0] in months:
+                            is_duplicate = True
+                            break
 
-                if ',' in search_key[0]:  # 处理日期范围
+                # 检查是否为表一中的重复数据
+                is_sheet1_duplicate = original_data in sheet1_seen_data
+                
+                # 将当前数据添加到已见过的数据集合中
+                sheet1_seen_data.add(original_data)
+                
+                # 处理日期范围
+                if ',' in search_key[0]:
+                    is_date_range = True
                     dates = search_key[0].split(',')
                     all_matches = True
-                    matched_results = set()  # 用于存储匹配结果的集合
+                    
+                    # 记录这个日期范围包含的月份
+                    date_range_map[search_key[1:]] = dates
                     
                     # 检查范围内的所有日期是否都能匹配
                     for date in dates:
@@ -526,30 +590,56 @@ class MainWindow(QMainWindow):
                             all_matches = False
                             logging.debug(f"未匹配的日期: {date}")
                             break
-                        # 将每个匹配的结果添加到集合中
-                        matched_results.add((date, sheet2_data[test_key]))
+                        # 将每个匹配的结果添加到列表中
+                        for supplier in sheet2_data[test_key]:
+                            matched_results.append((date, supplier))
                     
-                    if all_matches:
+                    is_date_range_all_match = all_matches
+                
+                # 检查单条数据是否匹配
+                elif search_key in sheet2_data:
+                    is_match = True
+                    for supplier in sheet2_data[search_key]:
+                        matched_results.append((search_key[0], supplier))
+                
+                # 根据优先级应用颜色
+                fill_color = None
+                font_color = '000000'  # 默认黑色
+                
+                # 颜色优先级：黄色(重复查询) > 橙色(表一重复) > 紫色/棕色(日期范围) > 绿色/红色(单条匹配)
+                if is_duplicate:
+                    # 黄色 - 重复数据（最高优先级）
+                    fill_color = openpyxl.styles.PatternFill(start_color='FFFF00', end_color='FFFF00', fill_type='solid')
+                elif is_sheet1_duplicate:
+                    # 橙色 - 表一中的重复数据（第二优先级）
+                    fill_color = openpyxl.styles.PatternFill(start_color='FFA500', end_color='FFA500', fill_type='solid')
+                elif is_date_range:
+                    if is_date_range_all_match:
                         # 紫色背景，白色字体 - 范围匹配成功
                         fill_color = openpyxl.styles.PatternFill(start_color='9370DB', end_color='9370DB', fill_type='solid')
                         font_color = 'FFFFFF'
-                        # 对匹配结果去重并添加到结果表
-                        unique_suppliers = {supplier for _, supplier in matched_results}
-                        for supplier in unique_suppliers:
-                            sheet3.append(original_data + (supplier,))
+                        # 为每个匹配的供应商添加一行，但避免重复
+                        for _, supplier in matched_results:
+                            # 创建一个唯一标识符，包含公司名称、产品名称和供应商
+                            record_key = (search_key[1], search_key[2], supplier)
+                            if record_key not in matched_records:
+                                sheet3.append(original_data + (supplier,))
+                                matched_records.add(record_key)
                     else:
-                        # 深红色背景，白色字体 - 范围匹配失败
-                        fill_color = openpyxl.styles.PatternFill(start_color='DC143C', end_color='DC143C', fill_type='solid')
+                        # 棕色背景，白色字体 - 范围匹配失败
+                        fill_color = openpyxl.styles.PatternFill(start_color='8B4513', end_color='8B4513', fill_type='solid')
                         font_color = 'FFFFFF'
                         sheet4.append(original_data + ('',))
-                
-                elif search_key in processed_keys:
-                    # 黄色 - 重复数据
-                    fill_color = openpyxl.styles.PatternFill(start_color='FFFF00', end_color='FFFF00', fill_type='solid')
-                elif search_key in sheet2_data:
+                elif is_match:
                     # 绿色 - 匹配成功
                     fill_color = openpyxl.styles.PatternFill(start_color='90EE90', end_color='90EE90', fill_type='solid')
-                    sheet3.append(original_data + (sheet2_data[search_key],))
+                    # 为每个匹配的供应商添加一行，但避免重复
+                    for _, supplier in matched_results:
+                        # 创建一个唯一标识符，包含公司名称、产品名称和供应商
+                        record_key = (search_key[1], search_key[2], supplier)
+                        if record_key not in matched_records:
+                            sheet3.append(original_data + (supplier,))
+                            matched_records.add(record_key)
                 else:
                     # 浅红色 - 未找到匹配
                     fill_color = openpyxl.styles.PatternFill(start_color='FFB6C1', end_color='FFB6C1', fill_type='solid')
@@ -561,12 +651,12 @@ class MainWindow(QMainWindow):
                     cell.fill = fill_color
                     cell.font = openpyxl.styles.Font(color=font_color)
 
-                if not search_key[0].startswith('R'):
-                    processed_keys.add(search_key)
+                # 将当前键添加到已处理集合中
+                processed_keys.add(search_key)
 
             progress.setValue(max_row - 1)
             self.progress_bar.setVisible(False)
-            
+                
         except Exception as e:
             self.progress_bar.setVisible(False)
             logging.error(f"数据处理出错: {str(e)}")
