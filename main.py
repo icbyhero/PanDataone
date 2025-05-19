@@ -22,6 +22,9 @@ def standardize_data(value: str, column_index: int) -> str:
     value = ''.join(value.split())
     
     if column_index == 1:
+        # 添加日志记录日期处理过程
+        logging.debug(f"处理日期值: {value}")
+        
         # 处理中文数字
         cn_num = {'一': '1', '二': '2', '三': '3', '四': '4', '五': '5',
                  '六': '6', '七': '7', '八': '8', '九': '9', '十': '10',
@@ -119,7 +122,7 @@ def standardize_data(value: str, column_index: int) -> str:
                     pass
     
     elif column_index == 2:
-        # 统一全角和半角字符
+        # 统一全角和半角字符 (客户名称)
         value = value.replace('（', '(').replace('）', ')')
         value = value.replace('：', ':').replace('，', ',')
         value = value.replace('"', '"').replace('"', '"')
@@ -131,12 +134,16 @@ def standardize_data(value: str, column_index: int) -> str:
         value = value.replace('，', ',').replace('：', ':')
         value = value.replace('　', '')  # 全角空格直接移除
         value = value.upper()
-    
+    result = value  # 假设这是最终结果
+    logging.debug(f"日期标准化结果: {result}")
     return value
 
-def get_sheet_data(sheet, row: int) -> Tuple[str, str, str]:
-    """获取并标准化数据"""
-    return tuple(standardize_data(str(sheet.cell(row=row, column=i).value), i) for i in range(1, 4))
+def get_sheet_data(sheet, row: int) -> Tuple:
+    """获取并标准化数据，包括供应商列"""
+    # 获取前四列数据（包括供应商列）
+    values = tuple(standardize_data(str(sheet.cell(row=row, column=i).value), i) for i in range(1, 4))
+    logging.debug(f"行{row}原始数据: {values}")
+    return values
 
 def clear_sheet(sheet) -> None:
     """清空指定工作表的数据"""
@@ -270,13 +277,13 @@ class MainWindow(QMainWindow):
 1. 数据准备：
    - 第一个工作表为"供应商待匹配表"，放入需要查询的数据
    - 第二个工作表为"供应商匹配原表"，放入用于匹配的数据
-   - 两个工作表的前三列必须包含：日期、供应商名称、产品名称
+   - 两个工作表的前三列必须包含：日期、客户名称、产品名称
    - 请确保Excel文件中只包含这两个工作表，避免干扰分析结果
 
 2. 数据格式要求：
    - 日期格式支持：2024-03、24年3月、3月、202411-12（会自动处理为多个月份）
      示例：2024-03、24年3月、3-4月（会自动处理为多个月份）
-   - 供应商名称：不区分全角半角，自动处理空格
+   - 客户名称：不区分全角半角，自动处理空格
      示例："ABC公司"与"A B C公司"会被视为相同
    - 产品名称：不区分大小写，自动处理特殊符号
      示例："Model-A"与"model a"会被视为相同
@@ -540,7 +547,6 @@ class MainWindow(QMainWindow):
                 # 获取原始数据
                 original_data = tuple(str(sheet1.cell(row=row, column=i).value) for i in range(1, 4))
                 search_key = get_sheet_data(sheet1, row)
-                
                 logging.debug(f"标准化后的搜索键: {search_key}")
     
                 # 初始化状态标记
@@ -590,7 +596,6 @@ class MainWindow(QMainWindow):
                     for date in dates:
                         test_key = (date,) + search_key[1:]
                         logging.debug(f"检查日期: {date}, 测试键: {test_key}")
-                        
                         # 无论日期是否重复，都检查匹配情况
                         if test_key in sheet2_data:
                             for supplier in sheet2_data[test_key]:
@@ -621,6 +626,7 @@ class MainWindow(QMainWindow):
                     if is_date_range:
                         if is_date_range_all_match:
                             # 为每个匹配的供应商添加一行，但避免重复
+                            matched_records = set()
                             for _, supplier in matched_results:
                                 # 创建一个唯一标识符，包含公司名称、产品名称和供应商
                                 record_key = (search_key[1], search_key[2], supplier)
@@ -632,6 +638,7 @@ class MainWindow(QMainWindow):
                     # 对于单条数据的重复
                     elif is_match:
                         # 为每个匹配的供应商添加一行，但避免重复
+                        matched_records = set()
                         for _, supplier in matched_results:
                             # 创建一个唯一标识符，包含公司名称、产品名称和供应商
                             record_key = (search_key[1], search_key[2], supplier)
@@ -646,6 +653,7 @@ class MainWindow(QMainWindow):
                         fill_color = openpyxl.styles.PatternFill(start_color='9370DB', end_color='9370DB', fill_type='solid')
                         font_color = 'FFFFFF'
                         # 为每个匹配的供应商添加一行，但避免重复
+                        matched_records = set()
                         for _, supplier in matched_results:
                             # 创建一个唯一标识符，包含公司名称、产品名称和供应商
                             record_key = (search_key[1], search_key[2], supplier)
@@ -661,6 +669,7 @@ class MainWindow(QMainWindow):
                     # 绿色 - 匹配成功
                     fill_color = openpyxl.styles.PatternFill(start_color='90EE90', end_color='90EE90', fill_type='solid')
                     # 为每个匹配的供应商添加一行，但避免重复
+                    matched_records = set()
                     for _, supplier in matched_results:
                         # 创建一个唯一标识符，包含公司名称、产品名称和供应商
                         record_key = (search_key[1], search_key[2], supplier)
