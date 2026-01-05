@@ -1,5 +1,3 @@
-# 2025-11-19 优化前代码. 此代码可用无问题.
-
 import sys
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QPushButton,
                              QVBoxLayout, QHBoxLayout, QTabWidget, QLabel,
